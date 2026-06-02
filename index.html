@@ -1,0 +1,1528 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>深夜三軌射擊：傳奇排行 - Midnight Survivor</title>
+    <!-- Tailwind CSS for elegant UI layout overlay -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Creepster&family=Share+Tech+Mono&display=swap');
+        
+        body {
+            background-color: #050508;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        .zombie-title {
+            font-family: 'Creepster', cursive;
+            text-shadow: 0 0 10px #ef4444, 0 0 20px #7f1d1d;
+        }
+
+        /* Scanline effect for arcade retro feeling */
+        .scanlines {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.25) 50%
+            ), linear-gradient(
+                90deg,
+                rgba(255, 0, 0, 0.06),
+                rgba(0, 255, 0, 0.02),
+                rgba(0, 255, 0, 0.06)
+            );
+            background-size: 100% 4px, 6px 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* CRT flicker */
+        @keyframes flicker {
+            0% { opacity: 0.98; }
+            50% { opacity: 1; }
+            100% { opacity: 0.99; }
+        }
+        .crt-flicker {
+            animation: flicker 0.15s infinite;
+        }
+
+        /* Loading Spinner */
+        .loader {
+            border: 3px solid rgba(16, 185, 129, 0.2);
+            border-top: 3px solid #10b981;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen py-4 px-2">
+
+    <!-- Wrapper to bound Game Box and Creator tag together -->
+    <div class="flex flex-col items-center gap-3 w-full max-w-lg">
+        
+        <!-- Main Game Container -->
+        <div class="relative w-full h-[83vh] md:h-[780px] bg-slate-950 rounded-2xl overflow-hidden border border-red-950/50 shadow-2xl shadow-red-900/10 flex flex-col">
+            
+            <!-- CRT Screen overlays -->
+            <div class="scanlines"></div>
+            <div class="absolute inset-0 bg-radial-gradient from-transparent to-black/40 pointer-events-none z-10"></div>
+
+            <!-- Upper HUD (Always Visible during gameplay) -->
+            <div id="hud" class="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-20 pointer-events-none opacity-0 transition-opacity duration-300">
+                <div class="flex flex-col">
+                    <span class="text-xs text-red-500 font-bold tracking-widest">KILLED</span>
+                    <span id="score-val" class="text-3xl text-red-500 font-extrabold tracking-wider">0</span>
+                </div>
+                
+                <!-- Health Bar -->
+                <div class="flex flex-col items-end w-1/3">
+                    <span class="text-xs text-emerald-400 font-bold tracking-widest mb-1">HP</span>
+                    <div class="w-full h-3 bg-slate-900 border border-slate-700 rounded-full overflow-hidden p-0.5">
+                        <div id="hp-fill" class="h-full bg-gradient-to-r from-red-600 to-emerald-500 rounded-full transition-all duration-100" style="width: 100%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ammo Overlay -->
+            <div id="weapon-hud" class="absolute bottom-24 left-4 z-20 pointer-events-none opacity-0 transition-opacity duration-300 flex flex-col">
+                <span id="weapon-name" class="text-xs text-yellow-500 font-bold tracking-widest uppercase">Pistol</span>
+                <div class="flex gap-1 mt-1" id="ammo-pips">
+                    <!-- Dynamically generated pips -->
+                </div>
+            </div>
+
+            <!-- Canvas -->
+            <canvas id="gameCanvas" class="w-full h-full block cursor-pointer"></canvas>
+
+            <!-- 1. AUTH SCREEN (Login & Register System) -->
+            <div id="auth-screen" class="absolute inset-0 bg-slate-950/95 z-40 flex flex-col justify-between p-6 text-center transition-all duration-500 overflow-y-auto">
+                <div class="my-auto space-y-6">
+                    <div class="relative">
+                        <h1 class="text-5xl md:text-6xl font-bold zombie-title tracking-wider leading-none select-none">
+                            MIDNIGHT<br><span class="text-emerald-500">SURVIVOR</span>
+                        </h1>
+                        <p class="text-red-500 font-bold tracking-widest text-[10px] uppercase mt-1">戰事安全存取系統</p>
+                        
+                        <!-- GAS Status Indicator -->
+                        <div class="mt-2 flex items-center justify-center gap-1.5">
+                            <span id="connection-dot" class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                            <span id="connection-status" class="text-[10px] text-amber-500 font-bold tracking-widest uppercase">正在驗證後端連線...</span>
+                        </div>
+                    </div>
+
+                    <!-- Mode Select Toggle -->
+                    <div class="flex bg-slate-900/80 p-1 rounded-lg border border-slate-800 max-w-sm mx-auto">
+                        <button id="tab-login" class="flex-1 py-1.5 text-xs font-bold rounded-md bg-emerald-500 text-slate-950 transition-all">登入帳號</button>
+                        <button id="tab-register" class="flex-1 py-1.5 text-xs font-bold text-slate-400 rounded-md hover:text-slate-200 transition-all">註冊帳號</button>
+                    </div>
+
+                    <!-- Auth Input Fields -->
+                    <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 max-w-sm mx-auto space-y-4 text-left">
+                        
+                        <!-- Account -->
+                        <div>
+                            <label for="auth-username" class="block text-xs font-bold text-slate-400 mb-1">
+                                <i class="fa-solid fa-user text-emerald-500 mr-1"></i> 帳號 (Username)
+                            </label>
+                            <input type="text" id="auth-username" placeholder="請輸入帳號" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-emerald-400 font-bold focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm">
+                        </div>
+
+                        <!-- Password -->
+                        <div>
+                            <label for="auth-password" class="block text-xs font-bold text-slate-400 mb-1">
+                                <i class="fa-solid fa-lock text-emerald-500 mr-1"></i> 密碼 (Password)
+                            </label>
+                            <input type="password" id="auth-password" placeholder="請輸入密碼" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-emerald-400 font-bold focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm">
+                        </div>
+
+                        <!-- Nickname (Only visible during signup) -->
+                        <div id="nickname-field" class="hidden">
+                            <label for="auth-nickname" class="block text-xs font-bold text-slate-400 mb-1">
+                                <i class="fa-solid fa-address-card text-emerald-500 mr-1"></i> 戰士名稱 (Name)
+                            </label>
+                            <input type="text" id="auth-nickname" maxlength="12" placeholder="請輸入您的遊戲暱稱" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-emerald-400 font-bold focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm">
+                        </div>
+
+                        <!-- Dynamic Error / Success Message Box -->
+                        <div id="auth-msg" class="text-xs font-bold text-center py-1.5 hidden transition-all duration-300 rounded bg-slate-950/80 border border-slate-900">
+                            <!-- JS Inject Msg -->
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <div class="max-w-xs mx-auto">
+                        <button id="auth-submit-btn" class="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-sm rounded-xl shadow-lg shadow-emerald-950/20 active:scale-95 transition-all tracking-widest flex items-center justify-center gap-2">
+                            <span>登入系統</span> <i class="fa-solid fa-right-to-bracket"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. START/MENU SCREEN OVERLAY (Shown after Login) -->
+            <div id="menu-screen" class="absolute inset-0 bg-slate-950/95 z-30 flex flex-col justify-between p-6 text-center transition-all duration-500 overflow-y-auto hidden">
+                <div class="my-auto space-y-5">
+                    <div class="relative">
+                        <h1 class="text-5xl md:text-6xl font-bold zombie-title tracking-wider leading-none select-none">
+                            MIDNIGHT<br><span class="text-emerald-500">SURVIVOR</span>
+                        </h1>
+                        <p class="text-red-600 font-bold tracking-widest text-xs uppercase mt-1">深夜三軌戰術防線</p>
+                    </div>
+
+                    <!-- User Welcome Header -->
+                    <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-3 max-w-sm mx-auto flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-circle-user text-emerald-400 text-lg"></i>
+                            <div class="text-left">
+                                <p class="text-[10px] text-slate-500 uppercase tracking-wider">目前戰士</p>
+                                <p id="welcome-user-name" class="text-emerald-400 font-extrabold text-sm">無名勇士</p>
+                            </div>
+                        </div>
+                        <button id="btn-logout" class="text-[10px] bg-red-950/50 hover:bg-red-900/50 text-red-400 font-bold px-2.5 py-1 rounded border border-red-900/30 transition-all">
+                            登出 <i class="fa-solid fa-arrow-right-from-bracket ml-0.5"></i>
+                        </button>
+                    </div>
+
+                    <!-- Leaderboard Top 3 Panel -->
+                    <div class="bg-slate-900/40 border border-red-950/40 rounded-xl p-4 max-w-sm mx-auto space-y-3 relative">
+                        <h3 class="text-sm font-black text-red-500 tracking-widest border-b border-red-950/60 pb-1.5 uppercase flex justify-between items-center">
+                            <span><i class="fa-solid fa-trophy text-amber-500 mr-1"></i> 前三名傳奇防禦榜</span>
+                            <span id="leaderboard-status" class="text-[9px] text-slate-500 lowercase tracking-normal font-normal"></span>
+                        </h3>
+                        <div id="leaderboard-list" class="space-y-2 text-sm text-slate-300 min-h-[100px] flex flex-col justify-center">
+                            <!-- Dynamically filled with top 3 records -->
+                        </div>
+                    </div>
+
+                    <!-- Game Controls Guide -->
+                    <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3 max-w-sm mx-auto text-left text-slate-400 space-y-1 text-xs">
+                        <div class="flex justify-between items-center">
+                            <span><kbd class="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-red-500 font-bold text-[10px]">1</kbd> / <kbd class="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-red-500 font-bold text-[10px]">2</kbd> / <kbd class="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-red-500 font-bold text-[10px]">3</kbd> 鍵：</span>
+                            <span class="text-slate-200">切換至 左 / 中 / 右 跑道</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span><kbd class="px-3 py-0.5 bg-slate-800 border border-slate-700 rounded text-amber-500 font-bold text-[10px]">Space 空白鍵</kbd> 或 <kbd class="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-amber-500 font-bold text-[10px]">0</kbd> 鍵：</span>
+                            <span class="text-slate-200">朝當前跑道開火</span>
+                        </div>
+                    </div>
+
+                    <div class="max-w-xs mx-auto">
+                        <button id="start-btn" class="w-full py-3.5 bg-gradient-to-r from-red-600 to-red-800 hover:from-red-500 hover:to-red-700 active:scale-95 text-white font-extrabold text-lg rounded-xl shadow-lg shadow-red-950/50 transition-all border border-red-500/30 tracking-widest">
+                            進入深夜防線 <i class="fa-solid fa-crosshairs ml-1"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Game Over Screen Overlay -->
+            <div id="gameover-screen" class="absolute inset-0 bg-red-950/95 z-30 flex flex-col justify-between p-8 text-center transition-all duration-500 hidden overflow-y-auto">
+                <div class="my-auto space-y-6">
+                    <div class="animate-bounce">
+                        <i class="fa-solid fa-skull-crossbones text-6xl text-red-500"></i>
+                    </div>
+                    <div class="space-y-1">
+                        <h2 class="text-4xl font-extrabold text-white tracking-widest zombie-title">你被殭屍吞噬了</h2>
+                        <p class="text-slate-400 text-sm">防線已失守，黑暗徹底籠罩...</p>
+                    </div>
+
+                    <div class="bg-black/50 border border-red-900/30 rounded-xl p-5 max-w-xs mx-auto space-y-3">
+                        <div>
+                            <p class="text-slate-400 text-xs tracking-widest uppercase">最終擊殺殭屍數</p>
+                            <p id="final-score" class="text-5xl font-black text-red-500 tracking-wider">0</p>
+                        </div>
+                        <div id="record-notification" class="text-xs text-amber-400 font-bold py-1 bg-amber-950/40 border border-amber-900/30 rounded-lg hidden animate-pulse">
+                            <i class="fa-solid fa-medal mr-1"></i> 榮登傳奇防禦前三名！
+                        </div>
+                        <div id="save-status-msg" class="text-[10px] text-slate-400 italic">正在儲存戰績到雲端...</div>
+                    </div>
+
+                    <div class="max-w-xs mx-auto space-y-3">
+                        <button id="restart-btn" class="w-full py-4 bg-gradient-to-r from-emerald-600 to-emerald-800 hover:from-emerald-500 hover:to-emerald-700 active:scale-95 text-white font-extrabold text-xl rounded-xl shadow-lg transition-all border border-emerald-500/30 tracking-widest">
+                            重新集結防禦 <i class="fa-solid fa-rotate-left ml-2"></i>
+                        </button>
+                        <button id="back-to-menu-btn" class="w-full py-2 bg-slate-900 hover:bg-slate-800 text-slate-400 font-bold text-sm rounded-lg transition-all">
+                            返回主畫面 (查看排行榜)
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- On Screen Quick Touch Buttons for Mobile/Tablet Players -->
+            <div class="absolute bottom-4 left-0 right-0 px-4 grid grid-cols-4 gap-2 z-20 md:hidden opacity-90 pointer-events-auto">
+                <button id="btn-lane-1" class="py-3 bg-slate-900/80 border border-slate-700/50 active:bg-blue-900/50 rounded-xl text-slate-300 font-black text-base active:scale-95 transition-all">軌道1</button>
+                <button id="btn-lane-2" class="py-3 bg-slate-900/80 border border-slate-700/50 active:bg-blue-900/50 rounded-xl text-slate-300 font-black text-base active:scale-95 transition-all">軌道2</button>
+                <button id="btn-lane-3" class="py-3 bg-slate-900/80 border border-slate-700/50 active:bg-blue-900/50 rounded-xl text-slate-300 font-black text-base active:scale-95 transition-all">軌道3</button>
+                <button id="btn-fire" class="py-3 bg-gradient-to-r from-red-600 to-orange-600 active:from-red-500 active:to-orange-500 rounded-xl text-white font-black text-base active:scale-95 transition-all shadow-md shadow-red-900/40">FIRE</button>
+            </div>
+        </div>
+
+        <!-- Creator Credits Label (Below Game Frame) -->
+        <div class="w-full flex justify-center py-1 select-none animate-pulse">
+            <span class="text-xs font-mono tracking-widest text-emerald-400/75 border border-emerald-950/40 px-5 py-2 rounded-full bg-slate-950/70 shadow-[0_0_15px_rgba(16,185,129,0.05)]">
+                製作者：a114080105金佩萱
+            </span>
+        </div>
+        
+    </div>
+
+    <!-- Web Audio & Core Game Engine Code -->
+    <script>
+        // ==========================================
+        // ⚠️ GOOGLE APPS SCRIPT WEB APP 配置區域
+        // 請在此處貼上你剛剛複製的 Web App 網址：
+        // ==========================================
+        const GAS_WEB_APP_URL = ""; 
+
+        // 偵測後端連線狀態
+        let isOnlineMode = false;
+
+        async function checkBackendConnection() {
+            const dot = document.getElementById('connection-dot');
+            const label = document.getElementById('connection-status');
+            
+            if (!GAS_WEB_APP_URL) {
+                isOnlineMode = false;
+                dot.className = "w-2.5 h-2.5 rounded-full bg-slate-500";
+                label.textContent = "離線模式 (LOCALSTORAGE)";
+                label.className = "text-[10px] text-slate-500 font-bold tracking-widest uppercase";
+                return;
+            }
+
+            try {
+                // 超時控制 4 秒
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 4000);
+                
+                const response = await fetch(GAS_WEB_APP_URL + "?action=test", {
+                    method: 'GET',
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                const res = await response.json();
+                
+                if (res && res.success) {
+                    isOnlineMode = true;
+                    dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping";
+                    label.textContent = "已連線至 GOOGLE SHEET";
+                    label.className = "text-[10px] text-emerald-500 font-bold tracking-widest uppercase";
+                } else {
+                    throw new Error("Invalid response");
+                }
+            } catch (err) {
+                isOnlineMode = false;
+                dot.className = "w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse";
+                label.textContent = "連線失敗，自動轉為離線模式";
+                label.className = "text-[10px] text-red-500 font-bold tracking-widest uppercase";
+            }
+        }
+
+        // --- SOUND EFFECTS (Web Audio API Synthesizer) ---
+        class SoundEffects {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            playShoot() {
+                this.init();
+                if (!this.ctx) return;
+                
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(450, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.12);
+                
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.12);
+            }
+
+            playExplode() {
+                this.init();
+                if (!this.ctx) return;
+
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.3);
+                
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.35);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.35);
+            }
+
+            playPowerup() {
+                this.init();
+                if (!this.ctx) return;
+
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(250, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(900, this.ctx.currentTime + 0.25);
+                
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.25);
+            }
+
+            playHurt() {
+                this.init();
+                if (!this.ctx) return;
+
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(110, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(30, this.ctx.currentTime + 0.2);
+                
+                gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.2);
+            }
+        }
+
+        const sfx = new SoundEffects();
+
+        // --- GAME ENGINE ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+            laneWidth = canvas.width / LANES_COUNT;
+            if (player) {
+                player.y = canvas.height - 130;
+                player.targetX = getLaneCenterX(player.lane);
+                player.currentX = player.targetX;
+            }
+            zombies.forEach(z => {
+                z.x = getLaneCenterX(z.lane);
+            });
+            powerups.forEach(pw => {
+                pw.x = getLaneCenterX(pw.lane || 1);
+            });
+        }
+
+        const LANES_COUNT = 3;
+        let laneWidth = canvas.width / LANES_COUNT;
+
+        let player = {
+            lane: 1,
+            targetX: 0,
+            currentX: 0,
+            y: 0,
+            width: 50,
+            height: 60,
+            maxHp: 100,
+            hp: 100,
+            flashDuration: 0,
+            weaponType: 'pistol',
+            ammo: 0,
+            maxAmmo: 0,
+            cooldown: 0,
+            lastShotTime: 0
+        };
+
+        let isPlaying = false;
+        let score = 0;
+        let activePlayerName = '無名勇士';
+
+        let zombies = [];
+        let bullets = [];
+        let particles = [];
+        let powerups = [];
+        let environmentalFog = [];
+        let screenShake = 0;
+
+        let spawnTimer = 0;
+        let spawnInterval = 1800;
+        let gameTimeElapsed = 0;
+
+        const WEAPONS = {
+            pistol: { name: '雙持手槍', maxAmmo: Infinity, cooldown: 200, damage: 1, color: '#fef08a' },
+            shotgun: { name: '戰術散彈槍', maxAmmo: 12, cooldown: 450, damage: 2, color: '#f97316' },
+            laser: { name: '重力離子雷射', maxAmmo: 8, cooldown: 500, damage: 4, color: '#3b82f6' },
+            rapid: { name: '高速衝鋒槍', maxAmmo: 40, cooldown: 90, damage: 0.8, color: '#10b981' }
+        };
+
+        const ZOMBIE_TYPES = [
+            { name: 'normal', color: '#10b981', speed: 1.1, hp: 1, size: 22, score: 1 },
+            { name: 'fast', color: '#ef4444', speed: 2.1, hp: 1, size: 18, score: 2 },
+            { name: 'tank', color: '#1e3a8a', speed: 0.55, hp: 4, size: 32, score: 4 }
+        ];
+
+        const POWERUP_TYPES = [
+            { type: 'shotgun', color: '#f97316', icon: 'S' },
+            { type: 'laser', color: '#3b82f6', icon: 'L' },
+            { type: 'rapid', color: '#10b981', icon: 'R' },
+            { type: 'heal', color: '#ec4899', icon: 'H' }
+        ];
+
+        // --- ACCOUNT & AUTH STATE (Supports GAS Cloud and Local Fallback) ---
+        let authMode = 'login';
+        const USERS_KEY = 'midnight_zombie_users';
+
+        function getLocalUsers() {
+            const data = localStorage.getItem(USERS_KEY);
+            if (!data) return {};
+            try { return JSON.parse(data); } catch (e) { return {}; }
+        }
+
+        document.getElementById('tab-login').addEventListener('click', () => {
+            authMode = 'login';
+            document.getElementById('tab-login').className = 'flex-1 py-1.5 text-xs font-bold rounded-md bg-emerald-500 text-slate-950 transition-all';
+            document.getElementById('tab-register').className = 'flex-1 py-1.5 text-xs font-bold text-slate-400 rounded-md hover:text-slate-200 transition-all';
+            document.getElementById('nickname-field').classList.add('hidden');
+            document.getElementById('auth-submit-btn').innerHTML = '<span>登入系統</span> <i class="fa-solid fa-right-to-bracket ml-1"></i>';
+            clearAuthMessage();
+        });
+
+        document.getElementById('tab-register').addEventListener('click', () => {
+            authMode = 'register';
+            document.getElementById('tab-register').className = 'flex-1 py-1.5 text-xs font-bold rounded-md bg-emerald-500 text-slate-950 transition-all';
+            document.getElementById('tab-login').className = 'flex-1 py-1.5 text-xs font-bold text-slate-400 rounded-md hover:text-slate-200 transition-all';
+            document.getElementById('nickname-field').classList.remove('hidden');
+            document.getElementById('auth-submit-btn').innerHTML = '<span>建立新帳號</span> <i class="fa-solid fa-user-plus ml-1"></i>';
+            clearAuthMessage();
+        });
+
+        function showAuthMessage(msg, isSuccess = false) {
+            const msgBox = document.getElementById('auth-msg');
+            msgBox.textContent = msg;
+            msgBox.classList.remove('hidden', 'text-red-500', 'text-emerald-500');
+            msgBox.classList.add(isSuccess ? 'text-emerald-500' : 'text-red-500');
+        }
+
+        function clearAuthMessage() {
+            document.getElementById('auth-msg').classList.add('hidden');
+        }
+
+        // Set UI loading state during HTTP requests
+        function setAuthLoading(isLoading) {
+            const btn = document.getElementById('auth-submit-btn');
+            const inputs = document.querySelectorAll('#auth-screen input');
+            if (isLoading) {
+                btn.disabled = true;
+                btn.innerHTML = `<span class="loader"></span> <span>連線處理中...</span>`;
+                inputs.forEach(i => i.disabled = true);
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = authMode === 'login' ? '<span>登入系統</span> <i class="fa-solid fa-right-to-bracket ml-1"></i>' : '<span>建立新帳號</span> <i class="fa-solid fa-user-plus ml-1"></i>';
+                inputs.forEach(i => i.disabled = false);
+            }
+        }
+
+        // POST/GET 連線呼叫
+        async function callGAS(data) {
+            if (!isOnlineMode || !GAS_WEB_APP_URL) return null;
+            try {
+                const response = await fetch(GAS_WEB_APP_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    headers: { 'Content-Type': 'text/plain' }
+                });
+                return await response.json();
+            } catch (error) {
+                console.error("GAS Connect Error:", error);
+                return null;
+            }
+        }
+
+        // Submit Authentication
+        document.getElementById('auth-submit-btn').addEventListener('click', async () => {
+            const usernameInput = document.getElementById('auth-username').value.trim();
+            const passwordInput = document.getElementById('auth-password').value.trim();
+            const nicknameInput = document.getElementById('auth-nickname').value.trim();
+
+            if (!usernameInput || !passwordInput) {
+                showAuthMessage('⚠ 請填寫完整帳號密碼！');
+                return;
+            }
+
+            setAuthLoading(true);
+
+            if (isOnlineMode) {
+                // =============== 雲端 GAS 模式 ===============
+                if (authMode === 'login') {
+                    const res = await callGAS({
+                        action: "login",
+                        username: usernameInput,
+                        password: passwordInput
+                    });
+                    setAuthLoading(false);
+                    if (res && res.success) {
+                        activePlayerName = res.nickname;
+                        onAuthSuccess();
+                    } else {
+                        showAuthMessage(res ? `⚠ ${res.error}` : '⚠ 無法連線至伺服器！');
+                    }
+                } else {
+                    if (!nicknameInput) {
+                        setAuthLoading(false);
+                        showAuthMessage('⚠ 請輸入您的戰士名稱（暱稱）！');
+                        return;
+                    }
+                    const res = await callGAS({
+                        action: "register",
+                        username: usernameInput,
+                        password: passwordInput,
+                        nickname: nicknameInput
+                    });
+                    setAuthLoading(false);
+                    if (res && res.success) {
+                        showAuthMessage('🎉 註冊成功！正在為您自動登入...', true);
+                        activePlayerName = nicknameInput;
+                        setTimeout(() => { onAuthSuccess(); }, 1200);
+                    } else {
+                        showAuthMessage(res ? `⚠ ${res.error}` : '⚠ 無法連線至伺服器！');
+                    }
+                }
+            } else {
+                // =============== 本地 LocalStorage 模式 ===============
+                setAuthLoading(false);
+                const localUsers = getLocalUsers();
+                if (authMode === 'login') {
+                    if (!localUsers[usernameInput] || localUsers[usernameInput].password !== passwordInput) {
+                        showAuthMessage('⚠ 帳號或密碼錯誤（本地模式）！');
+                        return;
+                    }
+                    activePlayerName = localUsers[usernameInput].nickname;
+                    onAuthSuccess();
+                } else {
+                    if (!nicknameInput) {
+                        showAuthMessage('⚠ 請輸入您的戰士名稱（暱稱）！');
+                        return;
+                    }
+                    if (localUsers[usernameInput]) {
+                        showAuthMessage('⚠ 此帳號在本地已被註冊！');
+                        return;
+                    }
+                    localUsers[usernameInput] = { password: passwordInput, nickname: nicknameInput };
+                    localStorage.setItem(USERS_KEY, JSON.stringify(localUsers));
+                    showAuthMessage('🎉 註冊成功！自動登入（本地模式）...', true);
+                    activePlayerName = nicknameInput;
+                    setTimeout(() => { onAuthSuccess(); }, 1200);
+                }
+            }
+        });
+
+        function onAuthSuccess() {
+            document.getElementById('welcome-user-name').textContent = activePlayerName;
+            document.getElementById('auth-screen').classList.add('hidden');
+            document.getElementById('menu-screen').classList.remove('hidden');
+            
+            document.getElementById('auth-username').value = '';
+            document.getElementById('auth-password').value = '';
+            document.getElementById('auth-nickname').value = '';
+            clearAuthMessage();
+
+            displayLeaderboard();
+        }
+
+        // Logout Event
+        document.getElementById('btn-logout').addEventListener('click', () => {
+            document.getElementById('menu-screen').classList.add('hidden');
+            document.getElementById('auth-screen').classList.remove('hidden');
+            checkBackendConnection();
+        });
+
+
+        // --- LOCAL STORAGE & LEADERBOARD SYSTEM ---
+        const LDB_KEY = 'midnight_zombie_leaderboard_data';
+
+        function getLocalLeaderboard() {
+            const dataStr = localStorage.getItem(LDB_KEY);
+            if (!dataStr) return [];
+            try {
+                const arr = JSON.parse(dataStr);
+                return arr.sort((a, b) => b.score - a.score);
+            } catch (e) {
+                return [];
+            }
+        }
+
+        // Render the Top 3 inside the HTML menu
+        async function displayLeaderboard() {
+            const listContainer = document.getElementById('leaderboard-list');
+            const statusLabel = document.getElementById('leaderboard-status');
+            
+            listContainer.innerHTML = `
+                <div class="flex flex-col items-center justify-center gap-2 py-4 text-emerald-400">
+                    <span class="loader"></span>
+                    <span class="text-xs">載入防禦榜數據中...</span>
+                </div>
+            `;
+
+            let leaderboardData = [];
+
+            if (isOnlineMode) {
+                statusLabel.textContent = "● cloud (google sheets)";
+                statusLabel.className = "text-[9px] text-emerald-500 tracking-normal font-bold uppercase";
+                const res = await callGAS({ action: "getLeaderboard" });
+                if (res && res.success) {
+                    leaderboardData = res.data;
+                } else {
+                    statusLabel.textContent = "● Cloud Load Error";
+                    statusLabel.className = "text-[9px] text-red-500 tracking-normal font-bold uppercase";
+                    leaderboardData = getLocalLeaderboard();
+                }
+            } else {
+                statusLabel.textContent = "○ local mode";
+                statusLabel.className = "text-[9px] text-slate-500 tracking-normal font-bold uppercase";
+                leaderboardData = getLocalLeaderboard();
+            }
+
+            const top3 = leaderboardData.slice(0, 3);
+
+            if (top3.length === 0) {
+                listContainer.innerHTML = `<div class="text-slate-500 text-xs italic py-2 text-center">尚無防守紀錄，等你來開創！</div>`;
+                return;
+            }
+
+            let html = '';
+            top3.forEach((record, index) => {
+                let badgeColor = '';
+                let badgeIcon = '';
+                let nameHighlight = 'text-slate-300';
+
+                if (index === 0) {
+                    badgeColor = 'bg-amber-500/10 border-amber-500/40 text-amber-400';
+                    badgeIcon = '<i class="fa-solid fa-crown text-amber-500 animate-pulse"></i>';
+                    nameHighlight = 'text-amber-300 font-extrabold';
+                } else if (index === 1) {
+                    badgeColor = 'bg-slate-400/10 border-slate-400/40 text-slate-300';
+                    badgeIcon = '<i class="fa-solid fa-medal text-slate-400"></i>';
+                    nameHighlight = 'text-slate-200 font-bold';
+                } else if (index === 2) {
+                    badgeColor = 'bg-amber-700/10 border-amber-700/40 text-amber-600';
+                    badgeIcon = '<i class="fa-solid fa-medal text-amber-700"></i>';
+                    nameHighlight = 'text-amber-700 font-bold';
+                }
+
+                html += `
+                    <div class="flex items-center justify-between px-3 py-1.5 rounded-lg border ${badgeColor}">
+                        <div class="flex items-center gap-2">
+                            <span class="w-5 text-center font-black">${index + 1}</span>
+                            ${badgeIcon}
+                            <span class="truncate max-w-[150px] ${nameHighlight}">${escapeHtml(record.name)}</span>
+                        </div>
+                        <span class="font-extrabold font-mono tracking-wider">${record.score} 殺</span>
+                    </div>
+                `;
+            });
+            listContainer.innerHTML = html;
+        }
+
+        // Save a new record into Local / GAS
+        async function saveScore(name, finalScore) {
+            const statusMsg = document.getElementById('save-status-msg');
+            statusMsg.classList.remove('hidden');
+            statusMsg.textContent = "正在將戰績儲存至雲端防線...";
+
+            // 始終保存在本地 local 做備份
+            const list = getLocalLeaderboard();
+            list.push({ name: name, score: finalScore, timestamp: Date.now() });
+            const sorted = list.sort((a, b) => b.score - a.score).slice(0, 10);
+            localStorage.setItem(LDB_KEY, JSON.stringify(sorted));
+
+            // 如果是在線模式，嘗試上傳
+            if (isOnlineMode) {
+                const res = await callGAS({
+                    action: "saveScore",
+                    name: name,
+                    score: finalScore
+                });
+                if (res && res.success) {
+                    statusMsg.textContent = "🎉 雲端數據儲存成功！";
+                } else {
+                    statusMsg.textContent = "⚠ 雲端儲存失敗，已暫存至本地瀏覽器。";
+                }
+            } else {
+                statusMsg.textContent = "戰績已儲存於本機 LocalStorage！";
+            }
+        }
+
+        function isTop3Score(finalScore) {
+            const list = getLocalLeaderboard();
+            if (list.length < 3) return true;
+            return finalScore > list[2].score;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.innerText = text;
+            return div.innerHTML;
+        }
+
+        // --- GAME LOGIC FUNCTIONS ---
+
+        function initGame() {
+            score = 0;
+            player.hp = player.maxHp;
+            player.lane = 1;
+            player.targetX = getLaneCenterX(1);
+            player.currentX = player.targetX;
+            player.y = canvas.height - 130;
+            player.weaponType = 'pistol';
+            player.ammo = Infinity;
+            player.maxAmmo = Infinity;
+            player.cooldown = 0;
+            player.lastShotTime = 0;
+
+            zombies = [];
+            bullets = [];
+            particles = [];
+            powerups = [];
+            environmentalFog = [];
+            screenShake = 0;
+            spawnTimer = 0;
+            spawnInterval = 1800;
+            gameTimeElapsed = 0;
+
+            for (let i = 0; i < 15; i++) {
+                environmentalFog.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    vx: (Math.random() - 0.5) * 0.4,
+                    vy: Math.random() * 0.2 + 0.1,
+                    radius: Math.random() * 40 + 30,
+                    alpha: Math.random() * 0.1 + 0.05
+                });
+            }
+
+            document.getElementById('score-val').textContent = '0';
+            document.getElementById('hp-fill').style.width = '100%';
+            updateWeaponHud();
+
+            document.getElementById('menu-screen').classList.add('hidden');
+            document.getElementById('gameover-screen').classList.add('hidden');
+            document.getElementById('hud').classList.remove('opacity-0');
+            document.getElementById('weapon-hud').classList.remove('opacity-0');
+
+            isPlaying = true;
+            sfx.init();
+        }
+
+        function getLaneCenterX(laneIndex) {
+            laneWidth = canvas.width / LANES_COUNT;
+            return laneWidth * laneIndex + laneWidth / 2;
+        }
+
+        function fireActiveWeapon() {
+            if (!isPlaying || player.hp <= 0) return;
+
+            const config = WEAPONS[player.weaponType];
+            const now = Date.now();
+
+            if (now - player.lastShotTime < config.cooldown) {
+                return;
+            }
+            player.lastShotTime = now;
+
+            const startX = player.currentX; 
+            const startY = player.y - player.height / 2;
+            const currentLane = player.lane;
+
+            sfx.playShoot();
+
+            if (player.weaponType === 'pistol') {
+                bullets.push({ x: startX, y: startY, lane: currentLane, vy: -12, damage: config.damage, color: config.color, size: 4, shape: 'round' });
+            } 
+            else if (player.weaponType === 'shotgun') {
+                bullets.push({ x: startX, y: startY, lane: currentLane, vy: -10, vx: -1.8, damage: config.damage, color: config.color, size: 5, shape: 'round' });
+                bullets.push({ x: startX, y: startY, lane: currentLane, vy: -11.5, vx: 0, damage: config.damage, color: config.color, size: 6, shape: 'round' });
+                bullets.push({ x: startX, y: startY, lane: currentLane, vy: -10, vx: 1.8, damage: config.damage, color: config.color, size: 5, shape: 'round' });
+                player.ammo--;
+            } 
+            else if (player.weaponType === 'laser') {
+                bullets.push({ x: startX, y: startY, lane: currentLane, vy: -19, damage: config.damage, color: config.color, size: 12, shape: 'ray' });
+                player.ammo--;
+                screenShake = 4;
+            } 
+            else if (player.weaponType === 'rapid') {
+                const offset = (Math.random() - 0.5) * 8;
+                bullets.push({ x: startX + offset, y: startY, lane: currentLane, vy: -15, damage: config.damage, color: config.color, size: 4, shape: 'round' });
+                player.ammo--;
+            }
+
+            createFlashParticles(startX, startY, config.color);
+
+            if (player.ammo <= 0 && player.weaponType !== 'pistol') {
+                player.weaponType = 'pistol';
+                player.ammo = Infinity;
+            }
+
+            updateWeaponHud();
+        }
+
+        function changeLane(laneIndex) {
+            if (!isPlaying) return;
+            player.lane = laneIndex;
+            player.targetX = getLaneCenterX(laneIndex);
+        }
+
+        // --- PARTICLE EFFECTS ---
+
+        function createFlashParticles(x, y, color) {
+            for (let i = 0; i < 6; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: (Math.random() - 0.8) * 3,
+                    radius: Math.random() * 3 + 1,
+                    alpha: 1,
+                    decay: 0.08,
+                    color: color
+                });
+            }
+        }
+
+        function createSplatParticles(x, y, color, count = 12) {
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 4 + 1;
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    radius: Math.random() * 4 + 1.5,
+                    alpha: 1,
+                    decay: Math.random() * 0.03 + 0.015,
+                    color: color
+                });
+            }
+        }
+
+        // --- UI REFRESH ---
+
+        // update weapon info on hud
+        function updateWeaponHud() {
+            const config = WEAPONS[player.weaponType];
+            document.getElementById('weapon-name').textContent = config.name;
+            document.getElementById('weapon-name').className = `text-xs font-bold tracking-widest uppercase ${
+                player.weaponType === 'pistol' ? 'text-slate-400' :
+                player.weaponType === 'shotgun' ? 'text-orange-400' :
+                player.weaponType === 'laser' ? 'text-blue-400' : 'text-emerald-400'
+            }`;
+
+            const ammoContainer = document.getElementById('ammo-pips');
+            ammoContainer.innerHTML = '';
+            
+            if (player.weaponType === 'pistol') {
+                const p = document.createElement('span');
+                p.className = 'text-xs font-bold text-slate-500';
+                p.textContent = '∞ 無限彈藥';
+                ammoContainer.appendChild(p);
+            } else {
+                for (let i = 0; i < player.ammo; i++) {
+                    const pip = document.createElement('div');
+                    pip.className = `w-1.5 h-3 rounded-full ${
+                        player.weaponType === 'shotgun' ? 'bg-orange-500 shadow-orange-500/50' :
+                        player.weaponType === 'laser' ? 'bg-blue-500 shadow-blue-500/50' : 'bg-emerald-500 shadow-emerald-500/50'
+                    } shadow-sm`;
+                    ammoContainer.appendChild(pip);
+                }
+            }
+        }
+
+        function takeDamage(amount) {
+            player.hp -= amount;
+            player.flashDuration = 8;
+            triggerScreenShake(8);
+            sfx.playHurt();
+
+            if (player.hp < 0) player.hp = 0;
+            document.getElementById('hp-fill').style.width = `${(player.hp / player.maxHp) * 100}%`;
+
+            if (player.hp <= 0) {
+                gameOver();
+            }
+        }
+
+        function heal(amount) {
+            player.hp += amount;
+            if (player.hp > player.maxHp) player.hp = player.maxHp;
+            document.getElementById('hp-fill').style.width = `${(player.hp / player.maxHp) * 100}%`;
+            createSplatParticles(player.currentX, player.y, '#ec4899', 8);
+        }
+
+        async function gameOver() {
+            isPlaying = false;
+            sfx.playExplode();
+
+            const isTop3 = isTop3Score(score);
+            const notifyElem = document.getElementById('record-notification');
+            if (isTop3 && score > 0) {
+                notifyElem.classList.remove('hidden');
+            } else {
+                notifyElem.classList.add('hidden');
+            }
+
+            document.getElementById('final-score').textContent = score;
+            document.getElementById('gameover-screen').classList.remove('hidden');
+
+            // 儲存分數並更新 (非同步)
+            await saveScore(activePlayerName, score);
+        }
+
+        // --- DRAWING GRAPHICS ---
+
+        function drawBackground() {
+            laneWidth = canvas.width / LANES_COUNT;
+            
+            const bgGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            bgGrad.addColorStop(0, '#020204');
+            bgGrad.addColorStop(0.6, '#06050e');
+            bgGrad.addColorStop(1, '#0b0914');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.strokeStyle = 'rgba(127, 29, 29, 0.15)';
+            ctx.lineWidth = 2;
+            
+            for (let i = 1; i < LANES_COUNT; i++) {
+                const lx = i * laneWidth;
+                ctx.beginPath();
+                ctx.moveTo(lx, 0);
+                ctx.lineTo(lx, canvas.height);
+                ctx.stroke();
+
+                ctx.strokeStyle = 'rgba(239, 68, 68, 0.08)';
+                ctx.setLineDash([15, 15]);
+                ctx.beginPath();
+                ctx.moveTo(lx, 0);
+                ctx.lineTo(lx, canvas.height);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            if (isPlaying && player.hp > 0) {
+                ctx.save();
+                ctx.strokeStyle = 'rgba(239, 68, 68, 0.15)'; 
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([5, 8]);
+                ctx.beginPath();
+                ctx.moveTo(player.currentX, 0);
+                ctx.lineTo(player.currentX, player.y - 20);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+            ctx.fillRect(0, player.y - 10, canvas.width, 10);
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.25)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, player.y - 10);
+            ctx.lineTo(canvas.width, player.y - 10);
+            ctx.stroke();
+
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.4)';
+            ctx.font = 'bold 10px "Share Tech Mono"';
+            ctx.fillText("TACTICAL DEFENSE BARRIER", 15, player.y - 15);
+        }
+
+        function drawPlayer() {
+            player.currentX += (player.targetX - player.currentX) * 0.22;
+
+            ctx.save();
+            ctx.translate(player.currentX, player.y);
+
+            if (player.flashDuration > 0) {
+                ctx.shadowColor = 'rgba(239, 68, 68, 0.8)';
+                ctx.shadowBlur = 15;
+                player.flashDuration--;
+            }
+
+            const radGrad = ctx.createRadialGradient(0, 0, 5, 0, 0, 35);
+            radGrad.addColorStop(0, 'rgba(59, 130, 246, 0.35)');
+            radGrad.addColorStop(1, 'rgba(59, 130, 246, 0)');
+            ctx.fillStyle = radGrad;
+            ctx.beginPath();
+            ctx.arc(0, 10, 30, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 6;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(-10, -10);
+            ctx.lineTo(-10, -32);
+            ctx.moveTo(10, -10);
+            ctx.lineTo(10, -32);
+            ctx.stroke();
+
+            const now = Date.now();
+            const config = WEAPONS[player.weaponType];
+            if (now - player.lastShotTime < 60) {
+                ctx.fillStyle = config.color;
+                ctx.beginPath();
+                ctx.arc(-10, -34, 5, 0, Math.PI * 2);
+                ctx.arc(10, -34, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            ctx.fillStyle = player.flashDuration % 2 === 1 ? '#ef4444' : '#1e293b';
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.roundRect(-16, -20, 32, 35, 6);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = '#06b6d4';
+            ctx.beginPath();
+            ctx.roundRect(-10, -14, 20, 8, 3);
+            ctx.fill();
+            
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.beginPath();
+            ctx.ellipse(-5, -11, 2, 4, Math.PI / 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#ef4444';
+            ctx.fillRect(-10, 2, 20, 3);
+
+            ctx.restore();
+        }
+
+        function drawZombies() {
+            zombies.forEach(zombie => {
+                ctx.save();
+                ctx.translate(zombie.x, zombie.y);
+
+                const shakeX = Math.sin(Date.now() / 60 + zombie.y) * 1.5;
+
+                const radGrad = ctx.createRadialGradient(shakeX, 0, 5, shakeX, 0, zombie.size * 1.5);
+                radGrad.addColorStop(0, 'rgba(16, 185, 129, 0.15)');
+                radGrad.addColorStop(1, 'rgba(16, 185, 129, 0)');
+                ctx.fillStyle = radGrad;
+                ctx.beginPath();
+                ctx.arc(shakeX, 10, zombie.size, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = zombie.color;
+                ctx.strokeStyle = '#064e3b';
+                ctx.lineWidth = 2;
+
+                ctx.beginPath();
+                ctx.arc(shakeX, -10, zombie.size / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#ef4444';
+                ctx.beginPath();
+                ctx.arc(shakeX - (zombie.size / 6), -12, 3, 0, Math.PI * 2);
+                ctx.arc(shakeX + (zombie.size / 6), -12, 3, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#064e3b';
+                ctx.beginPath();
+                ctx.ellipse(shakeX, 4, zombie.size / 1.5, zombie.size / 3, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                if (zombie.hp < zombie.maxHp) {
+                    const hpPercent = zombie.hp / zombie.maxHp;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                    ctx.fillRect(-15 + shakeX, -25, 30, 4);
+                    ctx.fillStyle = '#10b981';
+                    ctx.fillRect(-15 + shakeX, -25, 30 * hpPercent, 4);
+                }
+
+                ctx.restore();
+            });
+        }
+
+        function drawBullets() {
+            bullets.forEach(bullet => {
+                ctx.save();
+                ctx.shadowColor = bullet.color;
+                ctx.shadowBlur = 8;
+
+                if (bullet.shape === 'ray') {
+                    ctx.strokeStyle = bullet.color;
+                    ctx.lineWidth = bullet.size;
+                    ctx.lineCap = 'round';
+                    ctx.beginPath();
+                    ctx.moveTo(bullet.x, bullet.y);
+                    ctx.lineTo(bullet.x, bullet.y + 45);
+                    ctx.stroke();
+                } else {
+                    ctx.fillStyle = bullet.color;
+                    ctx.beginPath();
+                    ctx.arc(bullet.x, bullet.y, bullet.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            });
+        }
+
+        function drawPowerups() {
+            powerups.forEach(pw => {
+                ctx.save();
+                ctx.translate(pw.x, pw.y);
+
+                const pulse = Math.sin(Date.now() / 150) * 4;
+
+                ctx.shadowColor = pw.color;
+                ctx.shadowBlur = 10;
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+                ctx.strokeStyle = pw.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, 0, 16 + pulse / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = pw.color;
+                ctx.font = 'black 14px "Share Tech Mono"';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(pw.icon, 0, 1);
+
+                ctx.restore();
+            });
+        }
+
+        function drawAtmosphere() {
+            environmentalFog.forEach(f => {
+                ctx.save();
+                ctx.fillStyle = '#475569';
+                ctx.globalAlpha = f.alpha;
+                ctx.beginPath();
+                ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+
+                f.x += f.vx;
+                f.y += f.vy;
+
+                if (f.x - f.radius > canvas.width) f.x = -f.radius;
+                if (f.x + f.radius < 0) f.x = canvas.width + f.radius;
+                if (f.y - f.radius > canvas.height) f.y = -f.radius;
+            });
+
+            particles.forEach((p, idx) => {
+                ctx.save();
+                ctx.globalAlpha = p.alpha;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+
+                p.x += p.vx;
+                p.y += p.vy;
+                p.alpha -= p.decay;
+
+                if (p.alpha <= 0) {
+                    particles.splice(idx, 1);
+                }
+            });
+        }
+
+        // --- MATH & COORDINATE CALCULATIONS ---
+
+        function updateGame(dt) {
+            if (!isPlaying) return;
+
+            const modifier = dt / 16.66;
+            gameTimeElapsed += dt;
+
+            spawnInterval = Math.max(650, 1800 - (gameTimeElapsed / 140));
+
+            spawnTimer += dt;
+            if (spawnTimer >= spawnInterval) {
+                spawnTimer = 0;
+                spawnZombie();
+            }
+
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const b = bullets[i];
+                b.y += b.vy * modifier;
+                if (b.vx) b.x += b.vx * modifier;
+
+                if (b.y < -100) {
+                    bullets.splice(i, 1);
+                    continue;
+                }
+
+                for (let j = zombies.length - 1; j >= 0; j--) {
+                    const z = zombies[j];
+                    const dist = Math.hypot(b.x - z.x, b.y - z.y);
+
+                    if (dist < z.size + b.size) {
+                        z.hp -= b.damage;
+                        createFlashParticles(b.x, b.y, b.color);
+                        triggerScreenShake(2);
+
+                        if (b.shape !== 'ray') {
+                            bullets.splice(i, 1);
+                        }
+
+                        if (z.hp <= 0) {
+                            createSplatParticles(z.x, z.y, '#22c55e', 14); 
+                            score += z.score;
+                            document.getElementById('score-val').textContent = score;
+
+                            if (Math.random() < 0.12) {
+                                spawnPowerup(z.x, z.y, z.lane);
+                            }
+
+                            zombies.splice(j, 1);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            for (let i = zombies.length - 1; i >= 0; i--) {
+                const z = zombies[i];
+                z.y += z.speed * modifier;
+
+                if (z.y >= player.y - 10) {
+                    takeDamage(15);
+                    createSplatParticles(z.x, z.y, '#ef4444', 16); 
+                    zombies.splice(i, 1);
+                    continue;
+                }
+            }
+
+            for (let i = powerups.length - 1; i >= 0; i--) {
+                const pw = powerups[i];
+                pw.y += 1.2 * modifier;
+
+                if (pw.y > canvas.height + 20) {
+                    powerups.splice(i, 1);
+                    continue;
+                }
+
+                const distToPlayer = Math.hypot(player.currentX - pw.x, player.y - pw.y);
+                if (distToPlayer < player.width + 12) {
+                    collectPowerup(pw.type);
+                    powerups.splice(i, 1);
+                }
+            }
+
+            if (screenShake > 0) {
+                screenShake *= Math.pow(0.9, modifier);
+                if (screenShake < 0.2) screenShake = 0;
+            }
+        }
+
+        function spawnZombie() {
+            const lane = Math.floor(Math.random() * LANES_COUNT);
+            const x = getLaneCenterX(lane);
+            
+            let typePool = [ZOMBIE_TYPES[0]];
+            
+            if (gameTimeElapsed > 25000) {
+                typePool.push(ZOMBIE_TYPES[1]);
+            }
+            if (gameTimeElapsed > 50000) {
+                typePool.push(ZOMBIE_TYPES[2]);
+            }
+
+            const chosenType = typePool[Math.floor(Math.random() * typePool.length)];
+
+            zombies.push({
+                x: x,
+                y: -40,
+                lane: lane,
+                type: chosenType.name,
+                color: chosenType.color,
+                speed: chosenType.speed + (Math.random() * 0.15),
+                hp: chosenType.hp,
+                maxHp: chosenType.hp,
+                size: chosenType.size,
+                score: chosenType.score
+            });
+        }
+
+        function spawnPowerup(x, y, lane) {
+            const typeInfo = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
+            powerups.push({
+                x: x,
+                y: y,
+                lane: lane,
+                type: typeInfo.type,
+                color: typeInfo.color,
+                icon: typeInfo.icon
+            });
+        }
+
+        function collectPowerup(type) {
+            sfx.playPowerup();
+
+            if (type === 'heal') {
+                heal(30);
+            } else {
+                player.weaponType = type;
+                player.ammo = WEAPONS[type].maxAmmo;
+                updateWeaponHud();
+            }
+        }
+
+        // --- RENDER GAME LOOP with Fixed Timestep Accumulator ---
+        let lastTime = 0;
+        let accumulator = 0;
+        const timestep = 16.66; 
+
+        function gameLoop(currentTime) {
+            if (!lastTime) lastTime = currentTime;
+            let dt = currentTime - lastTime;
+            lastTime = currentTime;
+
+            if (dt > 100) dt = 16.66;
+            accumulator += dt;
+
+            while (accumulator >= timestep) {
+                updateGame(timestep);
+                accumulator -= timestep;
+            }
+
+            ctx.save();
+            
+            if (screenShake > 0) {
+                const dx = (Math.random() - 0.5) * screenShake;
+                const dy = (Math.random() - 0.5) * screenShake;
+                ctx.translate(dx, dy);
+            }
+
+            drawBackground();
+            drawPowerups();
+            drawBullets();
+            drawZombies();
+            drawPlayer();
+            drawAtmosphere();
+
+            ctx.restore();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- CONTROLLER BINDINGS & LISTENERS ---
+
+        window.addEventListener('keydown', (e) => {
+            if (!isPlaying) return;
+
+            if (e.key === '1') {
+                changeLane(0);
+            } else if (e.key === '2') {
+                changeLane(1);
+            } else if (e.key === '3') {
+                changeLane(2);
+            } 
+            else if (e.key === ' ' || e.code === 'Space' || e.key === '0') {
+                e.preventDefault(); 
+                fireActiveWeapon();
+            }
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (!isPlaying) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            
+            laneWidth = canvas.width / LANES_COUNT;
+            const clickedLane = Math.floor(clickX / laneWidth);
+            
+            if (clickedLane >= 0 && clickedLane < LANES_COUNT) {
+                changeLane(clickedLane);
+            }
+        });
+
+        canvas.addEventListener('touchstart', (e) => {
+            if (!isPlaying) return;
+            e.preventDefault();
+
+            const rect = canvas.getBoundingClientRect();
+            const touchX = e.touches[0].clientX - rect.left;
+            
+            laneWidth = canvas.width / LANES_COUNT;
+            const clickedLane = Math.floor(touchX / laneWidth);
+            
+            if (clickedLane >= 0 && clickedLane < LANES_COUNT) {
+                changeLane(clickedLane);
+            }
+        }, { passive: false });
+
+        document.getElementById('btn-lane-1').addEventListener('click', () => changeLane(0));
+        document.getElementById('btn-lane-2').addEventListener('click', () => changeLane(1));
+        document.getElementById('btn-lane-3').addEventListener('click', () => changeLane(2));
+        document.getElementById('btn-fire').addEventListener('click', () => fireActiveWeapon());
+
+        document.getElementById('start-btn').addEventListener('click', () => {
+            initGame();
+        });
+
+        document.getElementById('restart-btn').addEventListener('click', () => {
+            initGame();
+        });
+
+        document.getElementById('back-to-menu-btn').addEventListener('click', () => {
+            document.getElementById('gameover-screen').classList.add('hidden');
+            document.getElementById('menu-screen').classList.remove('hidden');
+            document.getElementById('hud').classList.add('opacity-0');
+            document.getElementById('weapon-hud').classList.add('opacity-0');
+            
+            displayLeaderboard();
+        });
+
+        window.onload = function() {
+            checkBackendConnection();
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            requestAnimationFrame((timestamp) => {
+                lastTime = timestamp;
+                gameLoop(timestamp);
+            });
+        };
+    </script>
+</body>
+</html>
